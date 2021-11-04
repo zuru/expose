@@ -20,9 +20,9 @@ import os
 import os.path as osp
 from typing import List, Optional
 import functools
-os.environ['PYOPENGL_PLATFORM'] = 'egl'
+# os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
-import resource
+# import resource
 import numpy as np
 from collections import OrderedDict, defaultdict
 from loguru import logger
@@ -53,8 +53,8 @@ from expose.config import cfg
 from expose.config.cmd_parser import set_face_contour
 from expose.utils.plot_utils import HDRenderer
 
-rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-resource.setrlimit(resource.RLIMIT_NOFILE, (rlimit[1], rlimit[1]))
+# rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+# resource.setrlimit(resource.RLIMIT_NOFILE, (rlimit[1], rlimit[1]))
 
 
 Vec3d = o3d.utility.Vector3dVector
@@ -282,6 +282,8 @@ def main(
         body_imgs = body_imgs.to(device=device)
         body_targets = [target.to(device) for target in body_targets]
         full_imgs = full_imgs.to(device=device)
+        # full_imgs.images : [1, 3, H, W]
+        # body_imgs : [1, 3, crop, crop]
 
         torch.cuda.synchronize()
         start = time.perf_counter()
@@ -322,7 +324,16 @@ def main(
 
         if stage_n_out is not None:
             model_vertices = stage_n_out.get('vertices', None)
-
+        
+        # body_output['stage_02'].keys()
+        # dict_keys([
+        #   'vertices', 'joints', 'global_orient', 'transl', 'betas', 
+        #   'body_pose', 'left_hand_pose', 'right_hand_pose', 
+        #   'expression', 'jaw_pose', 'raw_global_orient', 'raw_body_pose',
+        #   'raw_left_hand_pose', 'raw_right_hand_pose', 'raw_jaw_pose',
+        #   'faces'
+        # ])
+        
         faces = stage_n_out['faces']
         if model_vertices is not None:
             model_vertices = model_vertices.detach().cpu().numpy()
@@ -336,6 +347,14 @@ def main(
         stage_n_out = model_output.get('body', {}).get('final', {})
         if stage_n_out is not None:
             final_model_vertices = stage_n_out.get('vertices', None)
+        
+        # body_output['final'].keys()
+        # dict_keys([
+        #   'global_orient', 'body_pose', 'left_hand_pose', 
+        #   'right_hand_pose', 'jaw_pose', 'betas', 'expression', 
+        #   'vertices', 'joints', 'full_pose', 'transl', 'v_shaped',
+        #   'proj_joints'
+        # ])
 
         if final_model_vertices is not None:
             final_model_vertices = final_model_vertices.detach().cpu().numpy()
@@ -411,7 +430,7 @@ def main(
             if save_vis:
                 for name, curr_img in out_img.items():
                     pil_img.fromarray(curr_img[idx]).save(
-                        osp.join(curr_out_path, f'{name}.png'))
+                        osp.join(curr_out_path, f'{os.path.splitext(fname)[0]}_{name}.png'))
 
             if save_mesh:
                 # Store the mesh predicted by the body-crop network

@@ -1,0 +1,81 @@
+hrnet:
+  final_conv:
+    num_filters: 2048
+    num_layers: 5
+    stride: 1
+  pretrained_layers:
+  - '*'
+  pretrained_path: data/network_weights/hrnet/imagenet/hrnet_w48-8ef0771d.pth
+  stage1:
+    block: BOTTLENECK
+    fuse_method: SUM
+    num_blocks:
+    - 4
+    num_branches: 1
+    num_channels:
+    - 64
+    num_modules: 1
+  stage2:
+    block: BASIC
+    fuse_method: SUM
+    num_blocks:
+    - 4
+    - 4
+    num_branches: 2
+    num_channels:
+    - 48
+    - 96
+    num_modules: 1
+    subsample:
+      activ_type: relu
+      dim: 2
+      kernel_sizes:
+      - 3
+      norm_type: bn
+      num_filters:
+      - 384
+      padding: 1
+      strides:
+      - 2
+  stage3:
+    block: BASIC
+    fuse_method: SUM
+    num_blocks:
+    - 4
+    - 4
+    - 4
+    num_branches: 3
+    num_channels:
+    - 48
+    - 96
+    - 192
+    num_modules: 4
+    subsample:
+      activ_type: relu
+      dim: 2
+      kernel_sizes:
+      - 3
+      - 3
+      norm_type: bn
+      num_filters:
+      - 192
+      - 384
+      padding: 1
+      strides:
+      - 2
+      - 2
+  stage4:
+    block: BASIC
+    fuse_method: SUM
+    num_blocks:
+    - 4
+    - 4
+    - 4
+    - 4
+    num_branches: 4
+    num_channels:
+    - 48
+    - 96
+    - 192
+    - 384
+    num_modules: 3

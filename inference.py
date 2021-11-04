@@ -17,7 +17,7 @@
 import sys
 import os
 import os.path as osp
-os.environ['PYOPENGL_PLATFORM'] = 'egl'
+# os.environ['PYOPENGL_PLATFORM'] = 'egl'
 
 import matplotlib.pyplot as plt
 import PIL.Image as pil_img
@@ -35,7 +35,7 @@ import numpy as np
 
 import torch
 
-import resource
+# import resource
 
 from expose.utils.plot_utils import HDRenderer
 from expose.config.cmd_parser import set_face_contour
@@ -46,8 +46,8 @@ from expose.utils.checkpointer import Checkpointer
 from expose.data.targets.image_list import to_image_list
 
 
-rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-resource.setrlimit(resource.RLIMIT_NOFILE, (rlimit[1], rlimit[1]))
+# rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+# resource.setrlimit(resource.RLIMIT_NOFILE, (rlimit[1], rlimit[1]))
 
 
 Vec3d = o3d.utility.Vector3dVector
