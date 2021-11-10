@@ -1,11 +1,9 @@
+import argparse
 import gradio
 import torch
-import os
 from typing import Mapping, Tuple
 import numpy as np
 import toolz
-import cv2
-import functools
 import datetime
 
 from collections import defaultdict
@@ -116,22 +114,20 @@ def undo_img_normalization(image, mean, std, add_alpha=True):
             mode='constant', constant_values=1.0)
     return out_img
 
-# create model
-# load ckpt
-# get renderer
-# estimate bbox
-# crop input & preserve hd
-# predict body
-# render overlays
-
 if __name__ == '__main__':
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.deterministic = False
-    
-    # IMG_FILENAME = './samples/man-in-red-crew-neck-sweatshirt-photography-941693.png'
-    
-    
-    ## DensePose
+        
+    parser = argparse.ArgumentParser(
+        description='ExPose & DensePose Web Demo'
+    )
+    parser.add_argument('--share', required=False, default=False, 
+        action='store_true',
+        help='Geneate a sharable link for the demo, if False, it runs on localhost only.'
+    )
+    args = parser.parse_args()
+
+    ## DensePose init
     DENSEPOSE_CFG = './data/detectron2/densepose_rcnn_R_50_FPN_s1x.yaml'
     DENSEPOSE_WEIGHTS = './data/detectron2/model_final_162be9.pkl'
     cfg = get_cfg()
@@ -140,7 +136,7 @@ if __name__ == '__main__':
     cfg.MODEL.WEIGHTS = DENSEPOSE_WEIGHTS
     densepose = DefaultPredictor(cfg)   
 
-    ## ExPose
+    ## ExPose init
     CKPT_FILENAME = './data/checkpoints/model.ckpt'
     smplx_device = torch.device('cuda:0')
     model = SMPLX().to(smplx_device)
@@ -168,10 +164,6 @@ if __name__ == '__main__':
         img: np.array,
         gender: str,
         focal_length: float,
-        # detach_mean: bool,
-        # append_params: bool,
-        # predict_hands: bool,
-        # update_wrists: bool,
         hand_crop_size: int,
         head_crop_size: int,
         head_scale_factor: float,
@@ -179,10 +171,6 @@ if __name__ == '__main__':
         num_iterations: int
     ):
         global model
-        # model.predict_hands = predict_hands
-        # if not model.predict_hands:
-        #     model.apply_hand_network_on_body = False
-        # model.update_wrists = update_wrists
         model.head_scale_factor = head_scale_factor
         model.hand_scale_factor = hand_scale_factor        
         model.hand_crop_size = hand_crop_size
@@ -192,12 +180,8 @@ if __name__ == '__main__':
         if gender != model.body_model.gender or\
             focal_length != model.focal_length or\
             model.num_stages != int(num_iterations):
-            # detach_mean != model.detach_mean or\
-            # append_params != model.append_params or\
             model = SMPLX(
                 gender=gender,
-                # append_params=append_params,
-                # detach_mean=detach_mean,
                 focal_length=focal_length,
                 num_stages=int(num_iterations),
             ).to(smplx_device)
@@ -219,7 +203,6 @@ if __name__ == '__main__':
             bbox.add_field('orig_center', center)
             bbox.add_field('center', center)
             bbox.add_field('scale', scale)
-            # bbox.add_field('fname', os.path.basename(IMG_FILENAME))
 
             # DensePose
             outputs = densepose(img * 255)["instances"]
@@ -291,20 +274,12 @@ if __name__ == '__main__':
                     return_with_alpha=True,
                     body_color=[0.4, 0.4, 0.7]
                 )
-            # cv2.imwrite('orig.png', (orig_overlay[0].transpose(1, 2, 0) * 255).astype(np.uint8))
             return [
                 body_fit[0].transpose(1, 2, 0),
                 expressive_fit[0].transpose(1, 2, 0),
                 densepose_vis,
                 densepose_mask,
             ]
-            # return body_fit[0].transpose(1, 2, 0), expressive_fit[0].transpose(1, 2, 0)
-        
-    # cv2.imwrite('orig.png', (orig_overlay[0].transpose(1, 2, 0) * 255).astype(np.uint8))
-    # cv2.waitKey(-1)
-    
-    # img = (read_img(IMG_FILENAME) * 255).astype(np.uint8)
-    # expose(img)
 
     iface = gradio.Interface(predict,
         [
@@ -320,10 +295,6 @@ if __name__ == '__main__':
                 step=100.0, default=5000.0,
                 label='focal length'
             ),
-            # gradio.inputs.Checkbox(default=False, label='Detach mean'),
-            # gradio.inputs.Checkbox(default=True, label='Append params'),
-            # gradio.inputs.Checkbox(default=True, label='Predict hands'),
-            # gradio.inputs.Checkbox(default=True, label='Update wrists'),
             gradio.inputs.Number(default=224, label='Hand crop'),
             gradio.inputs.Number(default=256, label='Head crop'),
             gradio.inputs.Slider(
@@ -352,14 +323,12 @@ if __name__ == '__main__':
         description="Upload an image and select the body fitting parameters.",
         theme="darkgrass",
         flagging_options=[
-            "challenging_good", "ok_good", "bad_pose", "bad_shape"
+            "bad_pose", "bad_shape"
         ],
         allow_flagging=True,
         flagging_dir='flags_from_'+str(datetime.datetime.now().date()),
-        # show_tips=True,
         layout="unaligned",
-        # interpretation="default",
         css=".output_image, .input_image {height: 40rem !important; width: 100% !important;}",
-        examples='./test/web',
+        examples='./examples/web',
     )
-    iface.launch(inbrowser=True, share=True)
+    iface.launch(inbrowser=True, share=args.share)

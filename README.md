@@ -1,3 +1,21 @@
+# Web Demo of ExPose & DensePose
+
+## Requirements
+
+- ExPose (`pip install .`)
+- [detectron2](https://github.com/facebookresearch/detectron2/blob/main/INSTALL.md#install-pre-built-detectron2)
+- [DensePose](https://github.com/facebookresearch/detectron2/blob/main/projects/DensePose/doc/GETTING_STARTED.md)
+
+## Web Demo
+To run the web demo:
+
+1. Place the images from `{REPO_ROOT}\Core\examples\webchayan` to `.\examples\web`
+2. Download the [pre-trained DensePose model](https://dl.fbaipublicfiles.com/densepose/densepose_rcnn_R_50_FPN_s1x/165712039/model_final_162be9.pkl) to `./data/detectron2/model_final_162be9.pkl`.
+3. Download the [pre-trained ExPose model](https://psfiles.is.tuebingen.mpg.de/downloads/expose/expose_data-zip) (needs a login) to `.\data\checkpoints\model.ckpt`.
+4. Run `python app.py` for a localhost demo, or `python app.py --share` to get a publicly shared link.
+
+> Flagging an image stores it locally in a `flags-{DATE}` folder.
+
 ## ExPose: Monocular Expressive Body Regression through Body-Driven Attention
 
 [![report](https://img.shields.io/badge/arxiv-report-red)](https://arxiv.org/abs/2008.09062)
