@@ -224,33 +224,11 @@ class HeadPredictor(nn.Module):
         ''' Returns expression mean '''
         return self.expression_mean.reshape(1, -1).expand(batch_size, -1)
 
-    def get_param_mean(self, batch_size: int = 1,
-                       add_shape_noise: bool = False,
-                       shape_mean: Tensor = None,
-                       shape_std: float = 0.0,
-                       shape_prob: float = 0.0,
-                       add_expression_noise: bool = False,
-                       expression_mean: Tensor = None,
-                       expression_std: float = 0.0,
-                       expression_prob: float = 0.0,
-                       add_jaw_pose_noise: bool = False,
-                       jaw_noise_prob: float = 0.0,
-                       jaw_pose_min: float = None,
-                       jaw_pose_max: float = 1.0,
-                       targets: object = None,
-                       randomize_global_orient: bool = False,
-                       global_rot_noise_prob: float = 0.0,
-                       global_rot_min: float = 0.0,
-                       global_rot_max: float = 0.0,
-                       epsilon=1e-10,
-                       ):
+    def get_param_mean(self, batch_size: int = 1):
         ''' Return the mean that will be given to the iterative regressor
         '''
-        mean = self.regressor.get_mean().clone().reshape(1, -1).expand(
+        return self.regressor.get_mean().clone().reshape(1, -1).expand(
             batch_size, -1).clone()
-        if not self.training:
-            return mean
-        raise NotImplementedError
 
     def forward(self,
                 head_imgs: Tensor,
@@ -266,20 +244,18 @@ class HeadPredictor(nn.Module):
         '''
         '''
         batch_size = head_imgs.shape[0]
-        device, dtype = head_imgs.device, head_imgs.dtype
 
-        num_body_data = batch_size - num_head_imgs
         if batch_size == 0:
             return {}
 
         head_features = self.backbone(head_imgs)
-        head_parameters, head_deltas = self.regressor(
+        head_parameters, _ = self.regressor(
             head_features[self.feature_key],
             cond=head_mean)
 
         head_model_params = []
         model_parameters = []
-        for stage_idx, parameters in enumerate(head_parameters):
+        for _, parameters in enumerate(head_parameters):
             parameters_dict = self.param_tensor_to_dict(parameters)
 
             dec_neck_pose_abs = self.neck_pose_decoder(

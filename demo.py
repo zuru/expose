@@ -14,7 +14,7 @@
 #
 # Contact: ps-license@tuebingen.mpg.de
 
-
+import cv2
 import sys
 import os
 import os.path as osp
@@ -102,7 +102,7 @@ def preprocess_images(
         collate_fn=collate_fn
     )
 
-    out_dir = osp.expandvars('$HOME/Dropbox/boxes')
+    out_dir = osp.expandvars('./boxes')
     os.makedirs(out_dir, exist_ok=True)
 
     img_paths = []
@@ -121,7 +121,7 @@ def preprocess_images(
             _, fname = osp.split(img_path)
             fname, _ = osp.splitext(fname)
 
-            #  out_path = osp.join(out_dir, f'{fname}_{ii:03d}.jpg')
+            out_path = osp.join(out_dir, f'{fname}_{ii:03d}.jpg')
             for n, bbox in enumerate(output[ii]['boxes']):
                 bbox = bbox.detach().cpu().numpy()
                 if output[ii]['scores'][n].item() < min_score:
@@ -129,9 +129,9 @@ def preprocess_images(
                 img_paths.append(img_path)
                 bboxes.append(bbox)
 
-                #  cv2.rectangle(img, tuple(bbox[:2]), tuple(bbox[2:]),
-                #  (255, 0, 0))
-            #  cv2.imwrite(out_path, img[:, :, ::-1])
+                # cv2.rectangle(img, tuple(bbox[:2]), tuple(bbox[2:]),(255, 0, 0))
+                cv2.rectangle(img, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (255, 0, 0), 2)
+            cv2.imwrite(out_path, img[:, :, ::-1])
 
     dataset_cfg = exp_cfg.get('datasets', {})
     body_dsets_cfg = dataset_cfg.get('body', {})
@@ -224,7 +224,8 @@ def main(
     degrees: Optional[List[float]] = [],
 ) -> None:
 
-    device = torch.device('cuda')
+    # device = torch.device('cuda')
+    device = torch.device('cpu')
     if not torch.cuda.is_available():
         logger.error('CUDA is not available!')
         sys.exit(3)

@@ -61,7 +61,6 @@ class HandPredictor(nn.Module):
             num_betas: int=10,
             wrist_pose_mean=None,
             detach_mean=False,
-            mean_pose_path='',
             dtype=torch.float32
         ):
         super(HandPredictor, self).__init__()
@@ -185,38 +184,16 @@ class HandPredictor(nn.Module):
         ''' Returns neck pose mean '''
         return self.hand_pose_mean.reshape(1, -1).expand(batch_size, -1)
 
-    def get_param_mean(self,
-                       batch_size: int = 1,
-                       add_shape_noise: bool = False,
-                       shape_mean: Tensor = None,
-                       shape_std: float = 0.0,
-                       shape_prob: float = 0.0,
-                       num_hand_components: int = 3,
-                       add_hand_pose_noise: bool = False,
-                       hand_pose_mean: Tensor = None,
-                       hand_pose_std: float = 1.0,
-                       hand_noise_prob: float = 0.0,
-                       targets: List = None,
-                       randomize_global_orient: bool = False,
-                       global_rot_noise_prob: float = 0.0,
-                       global_rot_min: bool = 0.0,
-                       global_rot_max: bool = 0.0,
-                       ) -> Tensor:
+    def get_param_mean(self, batch_size: int = 1) -> Tensor:
         ''' Returns the mean vector given to the iterative regressor
         '''
-        mean = self.regressor.get_mean().clone().reshape(1, -1).expand(
+        return self.regressor.get_mean().clone().reshape(1, -1).expand(
             batch_size, -1).clone()
-        if not self.training:
-            return mean
-
-        raise NotImplementedError
 
     def param_tensor_to_dict(self, param_tensor):
         wrist_pose = torch.index_select(param_tensor, 1, self.wrist_pose_idxs)
         hand_pose = torch.index_select(param_tensor, 1, self.hand_pose_idxs)
-
         betas = torch.index_select(param_tensor, 1, self.shape_idxs)
-
         return dict(wrist_pose=wrist_pose, hand_pose=hand_pose, betas=betas)
 
     def forward(self,

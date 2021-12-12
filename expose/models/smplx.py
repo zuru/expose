@@ -355,7 +355,6 @@ class SMPLX(torch.nn.Module):
             detach_mean=self.detach_mean,
             append_params=self.append_params,
             num_stages=num_stages,
-            mean_pose_path=self.body_model_cfg.mean_pose_path,
             dtype=torch.float32
         )
 

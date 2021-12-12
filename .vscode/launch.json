@@ -5,18 +5,32 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "ExPose Demo",
             "type": "python",
             "request": "launch",
             "program": "demo.py",
             "console": "integratedTerminal",
             "args": [
-                "--image-folder", "test/web",
-                "--exp-cfg", "data/conf.yaml",                
-                "--output-folder", "output/web",
-                "--save-params", "True",
-                "--save-vis", "True",
-                "--save-mesh", "True",
+                "--image-folder",
+                // "test/web",
+                "./samples",
+                "--exp-cfg",
+                "data/conf.yaml",
+                "--output-folder",
+                "output/samples",
+                "--save-params",
+                "True",
+                "--save-vis",
+                "True",
+                "--save-mesh",
+                "True",
                 "--show=False",
             ]
         },
@@ -26,8 +40,30 @@
             "request": "launch",
             "program": "app.py",
             "console": "integratedTerminal",
+            "args": []
+        },
+        {
+            "name": "My ExPose Demo",
+            "type": "python",
+            "request": "launch",
+            "program": "mydemo.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
             "args": [
-
+                "--input_glob",
+                "C:\\Users\\nzioulis\\Desktop\\Code\\VZ\\data\\original\\team\\*.jpg",
+                // "C:\\Users\\nzioulis\\Desktop\\Code\\VZ\\expose\\samples\\*.png",
+            ]
+        },
+        {
+            "name": "Test App",
+            "type": "python",
+            "request": "launch",
+            "program": "test_app.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--input_glob",
+                "C:\\Users\\nzioulis\\Desktop\\Code\\VZ\\data\\original\\team\\*.jpg",
             ]
         }
     ]
