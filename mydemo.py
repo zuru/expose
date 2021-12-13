@@ -23,6 +23,7 @@ from expose.models.expose import ExPose
 from expose.utils.img_utils import read_img
 from expose.data import transforms as T
 from expose.models.camera.camera_projection import WeakPerspectiveCamera
+from expose.utils.rotation_utils import batch_rot2aa
 
 from logging import getLogger
 
@@ -298,8 +299,41 @@ if __name__ == '__main__':
         ),
         T.ToTensor(),
         T.Normalize(mean, std)
-    ])     
-    
+    ])
+
+    body_model_expressive = smplx.SMPLX(
+        model_path='./data/models/smplx/',
+        joint_mapper=JointMapper(smpl_to_openpose()),
+        create_global_orient=False,
+        create_body_pose=False,
+        create_betas=False,
+        create_left_hand_pose=False, # create_left_hand_pose,
+        create_right_hand_pose=False, # create_right_hand_pose,
+        create_expression=False, # create_expression,
+        create_jaw_pose=False, # create_jaw_pose,
+        create_leye_pose=True, # create_left_eye_pose,
+        create_reye_pose=True, # create_right_eye_pose,
+        create_transl=False,
+        dtype=torch.float32,
+        batch_size=1,
+        gender='neutral',
+        age='adult',
+        num_pca_comps=12,
+        use_pca=False,
+        num_betas=10,
+    ).to(smplx_device)
+    hd_renderer = HDRenderer(img_size=256)
+    material = pyrender.MetallicRoughnessMaterial(
+        metallicFactor=0.0, alphaMode='OPAQUE', 
+        baseColorFactor=(1.0, 1.0, 0.9, 1.0)
+    )
+    scene = pyrender.Scene(
+        bg_color=[0.0, 0.0, 0.0, 0.0],
+        ambient_light=(0.3, 0.3, 0.3)
+    )
+    for light in _create_raymond_lights():
+        scene.add_node(light)
+
     folder = os.path.dirname(args.input_glob)
     keypoints_glob = os.path.join(folder, 'keypoints', "*.json")
     for img_filename, kpts_filename in tqdm.tqdm(
@@ -377,32 +411,33 @@ if __name__ == '__main__':
             bg_img = np.clip(undo_img_normalization(
                 torch.flip(img, dims=[0]).unsqueeze(0).numpy(), mean, std
             ), 0.0, 1.0)
-            renderer = HDRenderer(img_size=256)
-            body_fit = renderer(
-                model_vertices,
+            
+            # body_fit = hd_renderer(
+            #     model_vertices,
+            #     faces,
+            #     focal_length=render_params['focal_length_in_px'],
+            #     camera_translation=render_params['transl'],
+            #     camera_center=render_params['center'],
+            #     bg_imgs=bg_img,
+            #     return_with_alpha=True,
+            # )
+            expressive_fit = hd_renderer(
+                final_model_vertices,
                 faces,
                 focal_length=render_params['focal_length_in_px'],
                 camera_translation=render_params['transl'],
                 camera_center=render_params['center'],
                 bg_imgs=bg_img,
                 return_with_alpha=True,
+                body_color=[0.4, 0.4, 0.7]
             )
-            expressive_fit = renderer(
-                    final_model_vertices,
-                    faces,
-                    focal_length=render_params['focal_length_in_px'],
-                    camera_translation=render_params['transl'],
-                    camera_center=render_params['center'],
-                    bg_imgs=bg_img,
-                    return_with_alpha=True,
-                    body_color=[0.4, 0.4, 0.7]
-                )
-            body_img = body_fit[0].transpose(1, 2, 0)[..., :3] * 255
+
+            # body_img = body_fit[0].transpose(1, 2, 0)[..., :3] * 255
             expressive_img = expressive_fit[0].transpose(1, 2, 0)[..., :3] * 255
             name, _ = os.path.splitext(os.path.basename(img_filename))
             outdir = os.path.join(os.path.dirname(img_filename), 'output')
             os.makedirs(outdir, exist_ok=True)
-            cv2.imwrite(os.path.join(outdir, f"{name}_body.png"), body_img.astype(np.uint8))
+            # cv2.imwrite(os.path.join(outdir, f"{name}_body.png"), body_img.astype(np.uint8))
             cv2.imwrite(os.path.join(outdir, f"{name}_expressive.png"), expressive_img.astype(np.uint8))
             
             joints = stage_n_out['joints']
@@ -428,37 +463,14 @@ if __name__ == '__main__':
                 rigid_joints.cpu().numpy().squeeze(),
                 rigid_kpts.cpu().numpy().squeeze(),
                 intrinsics,
-            )
-            
-            body_model_expressive = smplx.SMPLX(
-                model_path='./data/models/smplx/',
-                joint_mapper=JointMapper(smpl_to_openpose()),
-                create_global_orient=False,
-                create_body_pose=False,
-                create_betas=False,
-                create_left_hand_pose=False, # create_left_hand_pose,
-                create_right_hand_pose=False, # create_right_hand_pose,
-                create_expression=False, # create_expression,
-                create_jaw_pose=False, # create_jaw_pose,
-                create_leye_pose=True, # create_left_eye_pose,
-                create_reye_pose=True, # create_right_eye_pose,
-                create_transl=False,
-                dtype=torch.float32,
-                batch_size=1,
-                gender='neutral',
-                age='adult',
-                num_pca_comps=12,
-                use_pca=False,
-                num_betas=10,
-            ).to(smplx_device)
-
-            from expose.utils.rotation_utils import batch_rot2aa
+            )            
 
             orig_bbox_size = target.get_field('orig_bbox_size')
             bbox_center = target.get_field('orig_center')
             z = 2 * 5000 / (camera_scale * float(orig_bbox_size))
             # z = 2 * 5000 / (camera_scale * H)
             transl = torch.cat([camera_transl, z], dim=1)
+            
             body_params = body_model_expressive.forward(
                 betas=stage_n_out['betas'],
                 global_orient=batch_rot2aa(stage_n_out['global_orient'][0]),
@@ -475,15 +487,7 @@ if __name__ == '__main__':
                 pose2rot=True,
                 return_shaped=True
             )
-            material = pyrender.MetallicRoughnessMaterial(
-                metallicFactor=0.0, alphaMode='OPAQUE', baseColorFactor=(1.0, 1.0, 0.9, 1.0)
-            )
-            scene = pyrender.Scene(
-                bg_color=[0.0, 0.0, 0.0, 0.0],
-                ambient_light=(0.3, 0.3, 0.3)
-            )
-            for light in _create_raymond_lights():
-                scene.add_node(light)
+            
             renderer = pyrender.OffscreenRenderer(
                 viewport_width=W, viewport_height=H, point_size=1.0
             )
@@ -492,6 +496,8 @@ if __name__ == '__main__':
             tmesh = trimesh.Trimesh(
                 body_params['vertices'].detach().cpu().numpy().squeeze(),
                 body_model_expressive.faces,
+                # final_model_vertices.squeeze(),
+                # faces,                
                 process=False
             )
             rot = trimesh.transformations.rotation_matrix(np.radians(180), [1, 0, 0])
@@ -568,9 +574,9 @@ if __name__ == '__main__':
                 pt1 = tuple(rigid_kpts[0, i, :2].cpu().numpy().astype(np.int32))
                 pt2 = tuple((intrinsics @ (rj[0, i, :] / rj[0, i, 2:3])).astype(np.int32)[:2])
                 cv2.drawMarker(output_img, pt1, (200, 100, 0), cv2.MARKER_DIAMOND, H // 100,  + 1)
-                cv2.drawMarker(output_img, pt2, (0, 100, 200), cv2.MARKER_CROSS, H // 100, H // 1000 + 1)
-                
+                cv2.drawMarker(output_img, pt2, (0, 100, 200), cv2.MARKER_CROSS, H // 100, H // 1000 + 1)  
             cv2.imwrite(os.path.join(outdir, f'{name}_rendered.png'), output_img)
+            
             scene.remove_node(node)
             scene.remove_node(cam)
             

@@ -51,8 +51,8 @@
             "justMyCode": false,
             "args": [
                 "--input_glob",
-                // "C:\\Users\\nzioulis\\Desktop\\Code\\VZ\\data\\original\\team\\*.jpg",
-                "./test/team/*.jpeg",
+                "C:\\Users\\nzioulis\\Desktop\\Code\\VZ\\data\\original\\team\\*.jpg",
+                // "./test/team/*.jpeg",
                 // "C:\\Users\\nzioulis\\Desktop\\Code\\VZ\\expose\\samples\\*.png",
             ]
         },
