@@ -1,3 +1,5 @@
+import trimesh
+import pyrender
 import cv2
 import os
 import argparse
@@ -26,6 +28,55 @@ from logging import getLogger
 
 logger = getLogger(__name__)
 
+def _create_raymond_lights():
+    thetas = np.pi * np.array([1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0])
+    phis = np.pi * np.array([0.0, 2.0 / 3.0, 4.0 / 3.0])
+
+    nodes = []
+
+    for phi, theta in zip(phis, thetas):
+        xp = np.sin(theta) * np.cos(phi)
+        yp = np.sin(theta) * np.sin(phi)
+        zp = np.cos(theta)
+
+        z = np.array([xp, yp, zp])
+        z = z / np.linalg.norm(z)
+        x = np.array([-z[1], z[0], 0.0])
+        if np.linalg.norm(x) == 0:
+            x = np.array([1.0, 0.0, 0.0])
+        x = x / np.linalg.norm(x)
+        y = np.cross(z, x)
+
+        matrix = np.eye(4)
+        matrix[:3,:3] = np.c_[x,y,z]
+        nodes.append(pyrender.Node(
+            light=pyrender.DirectionalLight(color=np.ones(3), intensity=1.0),
+            matrix=matrix
+        ))
+    return nodes
+
+def p3p(
+    joints:     np.array,
+    kpts:       np.array,
+    intrinsics: np.array,
+):
+    pnp1 = cv2.solveP3P(joints, kpts, intrinsics, None, cv2.SOLVEPNP_AP3P)
+    pnp2 = cv2.solveP3P(joints, kpts, intrinsics, None, cv2.SOLVEPNP_P3P)
+    pnp_t = np.stack(pnp1[2] + pnp2[2]).squeeze()
+    min_index = 0
+    tj_0 = rigid_joints.cpu().numpy().squeeze() + pnp_t[0]
+    tpt_0 = intrinsics @ (tj_0 / tj_0[:, 2:3])[..., np.newaxis]
+    rp = rigid_kpts.cpu().numpy().squeeze()
+    e_0 = np.sqrt(np.mean((rp - tpt_0.squeeze()[:, :2]) ** 2))
+    for i in range(1, len(pnp_t)):
+        tj_i = rigid_joints.cpu().numpy().squeeze() + pnp_t[i]
+        tpt_i = intrinsics @ (tj_i / tj_i[:, 2:3])[..., np.newaxis]
+        e_i = np.sqrt(np.mean((rp - tpt_i.squeeze()[:, :2]) ** 2))
+        if e_i < e_0:
+            min_index = i
+    translation = pnp_t[min_index].squeeze()
+    return translation
+
 def smpl_to_openpose(model_type='smplx', use_hands=True, use_face=True,
                      use_face_contour=False, openpose_format='coco25'):
     ''' Returns the indices of the permutation that maps OpenPose to SMPL
@@ -49,26 +100,8 @@ def smpl_to_openpose(model_type='smplx', use_hands=True, use_face=True,
 
     '''
     if openpose_format.lower() == 'coco25':
-        if model_type == 'smpl':
-            return np.array([24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8, 1, 4,
-                             7, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34],
-                            dtype=np.int32)
-        elif model_type == 'smplh':
-            body_mapping = np.array([52, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5,
-                                     8, 1, 4, 7, 53, 54, 55, 56, 57, 58, 59,
-                                     60, 61, 62], dtype=np.int32)
-            mapping = [body_mapping]
-            if use_hands:
-                lhand_mapping = np.array([20, 34, 35, 36, 63, 22, 23, 24, 64,
-                                          25, 26, 27, 65, 31, 32, 33, 66, 28,
-                                          29, 30, 67], dtype=np.int32)
-                rhand_mapping = np.array([21, 49, 50, 51, 68, 37, 38, 39, 69,
-                                          40, 41, 42, 70, 46, 47, 48, 71, 43,
-                                          44, 45, 72], dtype=np.int32)
-                mapping += [lhand_mapping, rhand_mapping]
-            return np.concatenate(mapping)
         # SMPLX
-        elif model_type == 'smplx':
+        if model_type == 'smplx':
             body_mapping = np.array([55, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5,
                                      8, 1, 4, 7, 56, 57, 58, 59, 60, 61, 62,
                                      63, 64, 65], dtype=np.int32)
@@ -92,26 +125,7 @@ def smpl_to_openpose(model_type='smplx', use_hands=True, use_face=True,
         else:
             raise ValueError('Unknown model type: {}'.format(model_type))
     elif openpose_format == 'coco19':
-        if model_type == 'smpl':
-            return np.array([24, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5, 8,
-                             1, 4, 7, 25, 26, 27, 28],
-                            dtype=np.int32)
-        elif model_type == 'smplh':
-            body_mapping = np.array([52, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5,
-                                     8, 1, 4, 7, 53, 54, 55, 56],
-                                    dtype=np.int32)
-            mapping = [body_mapping]
-            if use_hands:
-                lhand_mapping = np.array([20, 34, 35, 36, 57, 22, 23, 24, 58,
-                                          25, 26, 27, 59, 31, 32, 33, 60, 28,
-                                          29, 30, 61], dtype=np.int32)
-                rhand_mapping = np.array([21, 49, 50, 51, 62, 37, 38, 39, 63,
-                                          40, 41, 42, 64, 46, 47, 48, 65, 43,
-                                          44, 45, 66], dtype=np.int32)
-                mapping += [lhand_mapping, rhand_mapping]
-            return np.concatenate(mapping)
-        # SMPLX
-        elif model_type == 'smplx':
+        if model_type == 'smplx':
             body_mapping = np.array([55, 12, 17, 19, 21, 16, 18, 20, 0, 2, 5,
                                      8, 1, 4, 7, 56, 57, 58, 59],
                                     dtype=np.int32)
@@ -144,7 +158,8 @@ class JointMapper(torch.nn.Module):
             self.joint_maps = joint_maps
         else:
             self.register_buffer('joint_maps',
-                                 torch.tensor(joint_maps, dtype=torch.long))
+                torch.tensor(joint_maps, dtype=torch.long)
+            )
 
     def forward(self, joints, **kwargs):
         if self.joint_maps is None:
@@ -385,8 +400,36 @@ if __name__ == '__main__':
             body_img = body_fit[0].transpose(1, 2, 0)[..., :3] * 255
             expressive_img = expressive_fit[0].transpose(1, 2, 0)[..., :3] * 255
             name, _ = os.path.splitext(os.path.basename(img_filename))
-            cv2.imwrite(f"{name}_body.png", body_img.astype(np.uint8))
-            cv2.imwrite(f"{name}_expressive.png", expressive_img.astype(np.uint8))
+            outdir = os.path.join(os.path.dirname(img_filename), 'output')
+            os.makedirs(outdir, exist_ok=True)
+            cv2.imwrite(os.path.join(outdir, f"{name}_body.png"), body_img.astype(np.uint8))
+            cv2.imwrite(os.path.join(outdir, f"{name}_expressive.png"), expressive_img.astype(np.uint8))
+            
+            joints = stage_n_out['joints']
+            joints = JointMapper(smpl_to_openpose()).to(joints.device)(joints)
+            rigid_joints = torch.cat([
+                torch.index_select(joints, dim=1, 
+                    index= torch.tensor([2, 5]).to(joints.device)
+                ),
+                torch.index_select(joints, dim=1, 
+                    index= torch.tensor([9, 8, 12]).to(joints.device)
+                ).mean(dim=-2, keepdim=True),
+            ], dim=1)
+            rigid_kpts = torch.index_select(keypoints[:, :2], dim=0, 
+                index= torch.tensor([2, 5, 8])
+            )# / torch.tensor([W, H]) / 5000.0 * 2.0 - 1.0
+            rigid_kpts = rigid_kpts.to(joints.device).unsqueeze(0)
+            intrinsics = np.array([
+                [5000.0,     0.0,    W / 2.0],
+                [0.0,       5000.0,  H / 2.0],
+                [0.0,       0.0,    1.0],
+            ])
+            translation = p3p(
+                rigid_joints.cpu().numpy().squeeze(),
+                rigid_kpts.cpu().numpy().squeeze(),
+                intrinsics,
+            )
+            
             body_model_expressive = smplx.SMPLX(
                 model_path='./data/models/smplx/',
                 joint_mapper=JointMapper(smpl_to_openpose()),
@@ -432,39 +475,9 @@ if __name__ == '__main__':
                 pose2rot=True,
                 return_shaped=True
             )
-            
-            import pyrender
-
             material = pyrender.MetallicRoughnessMaterial(
                 metallicFactor=0.0, alphaMode='OPAQUE', baseColorFactor=(1.0, 1.0, 0.9, 1.0)
             )
-            def _create_raymond_lights():
-                thetas = np.pi * np.array([1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0])
-                phis = np.pi * np.array([0.0, 2.0 / 3.0, 4.0 / 3.0])
-
-                nodes = []
-
-                for phi, theta in zip(phis, thetas):
-                    xp = np.sin(theta) * np.cos(phi)
-                    yp = np.sin(theta) * np.sin(phi)
-                    zp = np.cos(theta)
-
-                    z = np.array([xp, yp, zp])
-                    z = z / np.linalg.norm(z)
-                    x = np.array([-z[1], z[0], 0.0])
-                    if np.linalg.norm(x) == 0:
-                        x = np.array([1.0, 0.0, 0.0])
-                    x = x / np.linalg.norm(x)
-                    y = np.cross(z, x)
-
-                    matrix = np.eye(4)
-                    matrix[:3,:3] = np.c_[x,y,z]
-                    nodes.append(pyrender.Node(
-                        light=pyrender.DirectionalLight(color=np.ones(3), intensity=1.0),
-                        matrix=matrix
-                    ))
-
-                return nodes
             scene = pyrender.Scene(
                 bg_color=[0.0, 0.0, 0.0, 0.0],
                 ambient_light=(0.3, 0.3, 0.3)
@@ -475,10 +488,7 @@ if __name__ == '__main__':
                 viewport_width=W, viewport_height=H, point_size=1.0
             )
             rotation = np.eye(3)
-            translation = transl.detach().cpu().numpy().squeeze()
-
-            import trimesh
-
+            # translation = transl.detach().cpu().numpy().squeeze()
             tmesh = trimesh.Trimesh(
                 body_params['vertices'].detach().cpu().numpy().squeeze(),
                 body_model_expressive.faces,
@@ -488,26 +498,49 @@ if __name__ == '__main__':
             tmesh.apply_transform(rot)
             mesh = pyrender.Mesh.from_trimesh(tmesh, material=material)
             node = scene.add(mesh, 'mesh')
-
             # Equivalent to 180 degrees around the y-axis. Transforms the fit to
             # OpenGL compatible coordinate system.
             translation[0] *= -1.0
-            # translation[1] = 0.8
-            wcam = WeakPerspectiveCamera()
-            cam_scale = W / float(orig_bbox_size) * camera_scale
-            # proj = wcam.forward(body_params['joints'], cam_scale, camera_transl)
-            joints = body_params['joints']
-            joints = joints + torch.from_numpy(translation).to(joints)
-            proj = wcam.forward(joints[..., :2] / joints[..., 2:], cam_scale, camera_transl)
-            offset_x = ((keypoints[:, 0] - (W//2)) // (W//2) - proj[0, :, 0].cpu()).mean()
-            offset_y = ((keypoints[:, 1] - (H//2)) // (H//2) - proj[0, :, 1].cpu()).mean()            
-            # translation[0] += offset_x
-            # translation[1] += offset_y
+            # # translation[1] = 0.8
+            # wcam = WeakPerspectiveCamera()
+            # cam_scale = W / float(orig_bbox_size) * camera_scale
+            # # proj = wcam.forward(body_params['joints'], cam_scale, camera_transl)
+            # joints = body_params['joints']
+            # joints_t = joints + torch.from_numpy(translation).to(joints)
+            # # proj = wcam.forward(joints[..., :2] / joints[..., 2:], cam_scale, camera_transl)
+            # proj = wcam.forward(joints_t[..., :2], cam_scale, camera_transl)
+            # offset_x = ((keypoints[:, 0] - (W//2)) // (W//2) - proj[0, :, 0].cpu()).mean()
+            # offset_y = ((keypoints[:, 1] - (H//2)) // (H//2) - proj[0, :, 1].cpu()).mean()            
+            # # translation[0] += offset_x
+            # # translation[1] += offset_y
 
+            # rigid_joints = torch.cat([
+            #     torch.index_select(joints, dim=1, 
+            #         index= torch.tensor([2, 5]).to(joints.device)
+            #     ),
+            #     torch.index_select(joints, dim=1, 
+            #         index= torch.tensor([9, 8, 12]).to(joints.device)
+            #     ).mean(dim=-2, keepdim=True),
+            # ], dim=1)
+            # rigid_kpts = torch.index_select(keypoints[:, :2], dim=0, 
+            #     index= torch.tensor([2, 5, 8])
+            # )# / torch.tensor([W, H]) / 5000.0 * 2.0 - 1.0
+            # rigid_kpts = rigid_kpts.to(joints.device).unsqueeze(0)
+            # intrinsics = np.array([
+            #     [5000.0,     0.0,    W / 2.0],
+            #     [0.0,       5000.0,  H / 2.0],
+            #     [0.0,       0.0,    1.0],
+            # ])
+            # translation = p3p(
+            #     rigid_joints.cpu().numpy().squeeze(),
+            #     rigid_kpts.cpu().numpy().squeeze(),
+            #     intrinsics,
+            # )
+
+            # translation[0] *= -1.0
             camera_pose = np.eye(4)
             camera_pose[:3, :3] = rotation
-            camera_pose[:3, 3] = translation
-
+            camera_pose[:3, 3] = translation            
             camera = pyrender.camera.IntrinsicsCamera(
                 fx=5000, cx=W // 2,
                 fy=5000, cy=H // 2,
@@ -523,16 +556,21 @@ if __name__ == '__main__':
             output_img = 255.0 * (color[:, :, :-1] * valid_mask + (1 - valid_mask) * input_img)
             output_img = output_img.astype(np.uint8)
 
-            for i in range(25):
-                pt1 = tuple(keypoints[i, :2].cpu().numpy().astype(np.int32))
-                pt2 = tuple((
-                    # proj[0, i, :].cpu().numpy() * np.array([W / 2, H / 2]) + np.array([W / 2, H / 2])
-                    proj[0, i, :].cpu().numpy() * np.array([W / 2, H / 2]) + render_params['center'].squeeze()
-                ).astype(np.int32))
-                cv2.drawMarker(output_img, pt1, (200, 100, 0), cv2.MARKER_DIAMOND, H // 100, H // 1000)
-                cv2.drawMarker(output_img, pt2, (0, 100, 200), cv2.MARKER_CROSS, H // 100, H // 1000)
+            # proj = torch.index_select(proj, dim=1, index=torch.tensor([2, 5, 8]).to(proj.device))
+            translation[0] *= -1.0
+            rj = rigid_joints.cpu().numpy() + translation
+            for i in range(3):
+                # pt1 = tuple(keypoints[i, :2].cpu().numpy().astype(np.int32))
+                # pt2 = tuple((
+                #     # proj[0, i, :].cpu().numpy() * np.array([W / 2, H / 2]) + np.array([W / 2, H / 2])
+                #     proj[0, i, :].cpu().numpy() * np.array([W / 2, H / 2]) + render_params['center'].squeeze()
+                # ).astype(np.int32))
+                pt1 = tuple(rigid_kpts[0, i, :2].cpu().numpy().astype(np.int32))
+                pt2 = tuple((intrinsics @ (rj[0, i, :] / rj[0, i, 2:3])).astype(np.int32)[:2])
+                cv2.drawMarker(output_img, pt1, (200, 100, 0), cv2.MARKER_DIAMOND, H // 100,  + 1)
+                cv2.drawMarker(output_img, pt2, (0, 100, 200), cv2.MARKER_CROSS, H // 100, H // 1000 + 1)
                 
-            cv2.imwrite(f'{name}_rendered.png', output_img)
+            cv2.imwrite(os.path.join(outdir, f'{name}_rendered.png'), output_img)
             scene.remove_node(node)
             scene.remove_node(cam)
             
