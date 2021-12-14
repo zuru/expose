@@ -40,7 +40,8 @@ class ExPose(torch.nn.Module):
         num_betas: int=10,
         num_expression_coeffs: int=10,
         right_hand_pose_type: str='cont_rot_repr',
-        shape_mean_path: str='./data/shape_mean.npy',
+        # shape_mean_path: str='./data/shape_mean.npy',
+        shape_mean_path: str='',
         use_compressed: bool=True,
         use_face_contour: bool=True,
         use_face_keypoints: bool=True,
@@ -561,9 +562,10 @@ class ExPose(torch.nn.Module):
 
         # Compute the body surface using the current estimation of the pose and
         # the shape
+        # merged_params['transl'] = torch.tensor([[0.0, -0.1305, 0.0]]).to(device)
         body_model_output = self.body_model(
             get_skin=True, return_shaped=True, **merged_params)
-
+        # 0.0725
         # Split the vertices, joints, etc. to stages
         out_params = defaultdict(lambda: dict())
         for key in body_model_output:
@@ -946,6 +948,7 @@ class ExPose(torch.nn.Module):
         }
 
         # Compute the mesh using the new hand and face parameters
+        # final_body_parameters['transl'] = torch.tensor([[0.0, -0.1305, 0.0]]).to(device)
         final_body_model_output = self.body_model(
             get_skin=True, return_shaped=True, **final_body_parameters)
         param_dicts.append({

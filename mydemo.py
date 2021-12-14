@@ -25,9 +25,22 @@ from expose.data import transforms as T
 from expose.models.camera.camera_projection import WeakPerspectiveCamera
 from expose.utils.rotation_utils import batch_rot2aa
 
+from plyfile import PlyData, PlyElement
+
 from logging import getLogger
 
 logger = getLogger(__name__)
+
+def save_pcloud(filename: str, vertices: np.array):
+    md = [('x', 'f4'), ('y', 'f4'), ('z', 'f4')]
+    vertex_data = np.empty(len(vertices), dtype=md)
+    vertex_data["x"] = vertices[:, 0]
+    vertex_data["y"] = vertices[:, 1]
+    vertex_data["z"] = vertices[:, 2]
+    plydata = PlyData([
+        PlyElement.describe(vertex_data, 'vertex'),
+    ], text=False)
+    plydata.write(filename)
 
 def _create_raymond_lights():
     thetas = np.pi * np.array([1.0 / 6.0, 1.0 / 6.0, 1.0 / 6.0])
@@ -76,6 +89,30 @@ def p3p(
         if e_i < e_0:
             min_index = i
     translation = pnp_t[min_index].squeeze()
+    return translation
+
+def pnp(
+    joints:     np.array,
+    kpts:       np.array,
+    intrinsics: np.array,
+):
+    pnp1 = cv2.solvePnP(joints, kpts, intrinsics, None, cv2.SOLVEPNP_EPNP)
+    pnp2 = cv2.solvePnP(joints, kpts, intrinsics, None, cv2.SOLVEPNP_ITERATIVE)
+    pnp_t = np.stack([pnp1[2], pnp2[2]]).squeeze()
+    min_index = 0
+    tj_0 = rigid_joints.cpu().numpy().squeeze() + pnp_t[0]
+    tpt_0 = intrinsics @ (tj_0 / tj_0[:, 2:3])[..., np.newaxis]
+    rp = rigid_kpts.cpu().numpy().squeeze()
+    e_0 = np.sqrt(np.mean((rp - tpt_0.squeeze()[:, :2]) ** 2))
+    for i in range(1, len(pnp_t)):
+        tj_i = rigid_joints.cpu().numpy().squeeze() + pnp_t[i]
+        tpt_i = intrinsics @ (tj_i / tj_i[:, 2:3])[..., np.newaxis]
+        e_i = np.sqrt(np.mean((rp - tpt_i.squeeze()[:, :2]) ** 2))
+        if e_i < e_0:
+            min_index = i
+    translation = pnp_t[min_index].squeeze()
+    if translation[2] < 0:
+        translation *= -1.0
     return translation
 
 def smpl_to_openpose(model_type='smplx', use_hands=True, use_face=True,
@@ -321,6 +358,7 @@ if __name__ == '__main__':
         num_pca_comps=12,
         use_pca=False,
         num_betas=10,
+        flat_hand_mean=True,
     ).to(smplx_device)
     hd_renderer = HDRenderer(img_size=256)
     material = pyrender.MetallicRoughnessMaterial(
@@ -336,9 +374,11 @@ if __name__ == '__main__':
 
     folder = os.path.dirname(args.input_glob)
     keypoints_glob = os.path.join(folder, 'keypoints', "*.json")
+    all_images = glob.glob(args.input_glob)
+    all_keypoints = glob.glob(keypoints_glob)
     for img_filename, kpts_filename in tqdm.tqdm(
-        zip(glob.glob(args.input_glob), glob.glob(keypoints_glob)),
-        desc="ExPose"
+        zip(all_images, all_keypoints),
+        desc="ExPose", total=len(all_images)
     ):
         img = read_img(img_filename)
         data = read_keypoints(kpts_filename)
@@ -442,28 +482,50 @@ if __name__ == '__main__':
             
             joints = stage_n_out['joints']
             joints = JointMapper(smpl_to_openpose()).to(joints.device)(joints)
-            rigid_joints = torch.cat([
-                torch.index_select(joints, dim=1, 
-                    index= torch.tensor([2, 5]).to(joints.device)
-                ),
-                torch.index_select(joints, dim=1, 
-                    index= torch.tensor([9, 8, 12]).to(joints.device)
-                ).mean(dim=-2, keepdim=True),
-            ], dim=1)
-            rigid_kpts = torch.index_select(keypoints[:, :2], dim=0, 
-                index= torch.tensor([2, 5, 8])
-            )# / torch.tensor([W, H]) / 5000.0 * 2.0 - 1.0
-            rigid_kpts = rigid_kpts.to(joints.device).unsqueeze(0)
+            # rigid_joints = torch.cat([
+            #     torch.index_select(joints, dim=1, 
+            #         index= torch.tensor([2, 5]).to(joints.device)
+            #     ),
+            #     torch.index_select(joints, dim=1, 
+            #         index= torch.tensor([9, 8, 12]).to(joints.device)
+            #     ).mean(dim=-2, keepdim=True),
+            # ], dim=1)
+            # rigid_kpts = torch.index_select(keypoints[:, :2], dim=0, 
+            #     index= torch.tensor([2, 5, 8])
+            # )# / torch.tensor([W, H]) / 5000.0 * 2.0 - 1.0
+            # rigid_kpts = rigid_kpts.to(joints.device).unsqueeze(0)
+            # intrinsics = np.array([
+            #     [5000.0,     0.0,    W / 2.0],
+            #     [0.0,       5000.0,  H / 2.0],
+            #     [0.0,       0.0,    1.0],
+            # ])
+            # translation = p3p(
+            #     rigid_joints.cpu().numpy().squeeze(),
+            #     rigid_kpts.cpu().numpy().squeeze(),
+            #     intrinsics,
+            # )
+            offset = torch.tensor([[0.0, -0.1305, 0.0]]).to(joints.device)
+            joints = joints + offset
+            good_kpts = keypoints[:22, 2] > 0.75
+            good_indices = torch.arange(len(good_kpts))[good_kpts].to(joints.device)
+            rigid_kpts = torch.index_select(
+                keypoints[:, :2].to(joints.device),
+                dim=0, index=good_indices
+            ).unsqueeze(0)
+            rigid_joints = torch.index_select(joints, dim=1, index=good_indices)            
             intrinsics = np.array([
                 [5000.0,     0.0,    W / 2.0],
                 [0.0,       5000.0,  H / 2.0],
                 [0.0,       0.0,    1.0],
             ])
-            translation = p3p(
+            translation = pnp(
                 rigid_joints.cpu().numpy().squeeze(),
                 rigid_kpts.cpu().numpy().squeeze(),
                 intrinsics,
-            )            
+            )
+            # offset_trans = np.array([0.0, -0.1305, 0.0], dtype=np.float32)
+            # translation += offset_trans
+
 
             orig_bbox_size = target.get_field('orig_bbox_size')
             bbox_center = target.get_field('orig_center')
@@ -487,6 +549,19 @@ if __name__ == '__main__':
                 pose2rot=True,
                 return_shaped=True
             )
+            # body_params = model.body_model.forward(
+            #     betas=stage_n_out['betas'],
+            #     global_orient=stage_n_out['global_orient'],
+            #     body_pose=stage_n_out['body_pose'],
+            #     left_hand_pose=stage_n_out['left_hand_pose'],
+            #     right_hand_pose=stage_n_out['right_hand_pose'],
+            #     expression=stage_n_out['expression'],
+            #     transl=torch.zeros_like(transl),
+            #     jaw_pose=stage_n_out['jaw_pose'],
+            #     return_verts=True,
+            #     return_full_pose=True,
+            #     pose2rot=False,                
+            # )
             
             renderer = pyrender.OffscreenRenderer(
                 viewport_width=W, viewport_height=H, point_size=1.0
@@ -506,6 +581,48 @@ if __name__ == '__main__':
             node = scene.add(mesh, 'mesh')
             # Equivalent to 180 degrees around the y-axis. Transforms the fit to
             # OpenGL compatible coordinate system.
+
+            joints = body_params['joints']
+            # rigid_joints = torch.cat([
+            #     torch.index_select(joints, dim=1, 
+            #         index= torch.tensor([2, 5]).to(joints.device)
+            #     ),
+            #     torch.index_select(joints, dim=1, 
+            #         index= torch.tensor([9, 8, 12]).to(joints.device)
+            #     ).mean(dim=-2, keepdim=True),
+            # ], dim=1)
+            # rigid_kpts = torch.index_select(keypoints[:, :2], dim=0, 
+            #     index= torch.tensor([2, 5, 8])
+            # )# / torch.tensor([W, H]) / 5000.0 * 2.0 - 1.0
+            # rigid_kpts = rigid_kpts.to(joints.device).unsqueeze(0)
+            # intrinsics = np.array([
+            #     [5000.0,     0.0,    W / 2.0],
+            #     [0.0,       5000.0,  H / 2.0],
+            #     [0.0,       0.0,    1.0],
+            # ])
+            # translation = p3p(
+            #     rigid_joints.cpu().numpy().squeeze(),
+            #     rigid_kpts.cpu().numpy().squeeze(),
+            #     intrinsics,
+            # )  
+            # good_kpts = keypoints[:22, 2] > 0.75
+            # good_indices = torch.arange(len(good_kpts))[good_kpts].to(joints.device)
+            # rigid_kpts = torch.index_select(
+            #     keypoints[:, :2].to(joints.device),
+            #     dim=0, index=good_indices
+            # ).unsqueeze(0)
+            # rigid_joints = torch.index_select(joints, dim=1, index=good_indices)            
+            # intrinsics = np.array([
+            #     [5000.0,     0.0,    W / 2.0],
+            #     [0.0,       5000.0,  H / 2.0],
+            #     [0.0,       0.0,    1.0],
+            # ])
+            # translation = pnp(
+            #     rigid_joints.cpu().numpy().squeeze(),
+            #     rigid_kpts.cpu().numpy().squeeze(),
+            #     intrinsics,
+            # )    
+
             translation[0] *= -1.0
             # # translation[1] = 0.8
             # wcam = WeakPerspectiveCamera()
