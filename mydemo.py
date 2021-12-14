@@ -25,6 +25,9 @@ from expose.data import transforms as T
 from expose.models.camera.camera_projection import WeakPerspectiveCamera
 from expose.utils.rotation_utils import batch_rot2aa
 
+from human_body_prior.tools.model_loader import load_model 
+from human_body_prior.models.vposer_model import VPoser
+
 from plyfile import PlyData, PlyElement
 
 from logging import getLogger
@@ -325,6 +328,14 @@ if __name__ == '__main__':
     load_checkpoint(model, CKPT_FILENAME)
     model = model.eval()
 
+    # VPoser init
+    VPZ_CKPT_FILENAME = 'E:\VCL\Data\SMPL\V02_05\V02_05'
+    vposer, _ = load_model(VPZ_CKPT_FILENAME, model_code=VPoser,
+        remove_words_in_model_weights='vp_model.', disable_grad=True
+    )
+    vposer = vposer.to(device=smplx_device)
+    vposer.eval()
+
     transform = Compose(
         [ToTensor(), ]
     )
@@ -533,10 +544,13 @@ if __name__ == '__main__':
             # z = 2 * 5000 / (camera_scale * H)
             transl = torch.cat([camera_transl, z], dim=1)
             
+            body_pose = batch_rot2aa(stage_n_out['body_pose'][0]).flatten()[np.newaxis, ...]
+            body_pose = vposer(body_pose)['pose_body']
+
             body_params = body_model_expressive.forward(
                 betas=stage_n_out['betas'],
                 global_orient=batch_rot2aa(stage_n_out['global_orient'][0]),
-                body_pose=batch_rot2aa(stage_n_out['body_pose'][0]).flatten()[np.newaxis, ...],
+                body_pose=body_pose,
                 left_hand_pose=batch_rot2aa(stage_n_out['left_hand_pose'][0]).flatten()[np.newaxis, ...],
                 right_hand_pose=batch_rot2aa(stage_n_out['right_hand_pose'][0]).flatten()[np.newaxis, ...],
                 transl=torch.zeros_like(transl),
